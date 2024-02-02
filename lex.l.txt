@@ -1,0 +1,111 @@
+%{
+	#include<stdio.h>
+	#include<string.h>
+	#include "y.tab.h"
+	int nbrL = 1;
+	int j = 1;
+	FILE *file;
+	extern YYSTYPE yylval;
+
+	void comment(char * ch){
+        int k=0;
+        size_t i;
+        for(i = 0 ; i <strlen(yytext);i++){
+            if(ch[i]=='\n'){
+                nbrL++; j = 1;
+                k=yyleng-i; yyleng=i;  
+            }else j++; yyleng++;
+        }
+        printf(" -- commentaire\n");
+    }
+
+%}
+
+IDF [A-Z][a-zA-Z0-9]*
+chiffre [0-9]
+entier {chiffre}+
+reel {chiffre}+"."{chiffre}+|{chiffre}+
+integer -?{entier}
+real -?{reel}
+OpCm ">="|"<="|"=="|"!="|"<"|">"
+com "//"([""*]*[^\("//"\)]*)*"//"
+%%
+
+"{" { printf("{ \n"); j += yyleng; return '{'; }
+
+"}" { printf("} \n"); j += yyleng; return '}'; }
+
+";" { printf("; \n"); j += yyleng; return ';'; }
+
+"," { printf(","); j += yyleng; return ','; }
+
+"\n" { nbrL++; j = 0;}
+
+"\t" {j += yyleng;}
+
+" " { j += yyleng; }
+
+":" { printf(":"); j += yyleng; return ':'; }
+
+"=" { printf("=");j += yyleng; return '='; }
+
+"#" { printf("#");j += yyleng; return '#'; }
+
+"(" { printf("(");j += yyleng; return '('; }
+
+")" { printf(")");j += yyleng; return ')'; }
+
+"[" { printf("[");j += yyleng; return '['; }
+
+"]" { printf("]");j += yyleng; return ']'; }
+
+"&" { printf("&"); j += yyleng; return '&'; }
+
+"|" { printf("|"); j += yyleng; return '|'; }
+
+"!" { printf("!"); j += yyleng; return '!'; }
+
+"+" { printf("+"); j += yyleng; return '+'; }
+
+"-" { printf("-"); j += yyleng; return '-'; }
+
+"*" { printf("*"); j += yyleng; return '*'; }
+
+"/" { printf("/"); j += yyleng; return '/'; }
+
+"Calcul" {printf("Calcul\n");j += yyleng;  return Calcul; }
+
+"BOUCLE" {printf("BOUCLE\n");j += yyleng;  return BOUCLE; }
+
+"TAB" {printf("TAB\n");j += yyleng;  return TAB; }
+
+"EXECUT" {printf("EXECUT");j += yyleng;  return EXECUT; }
+
+"IF" {printf("IF");j += yyleng;  return IF; }
+
+"While" {printf("While");j += yyleng;  return While; }
+
+"CONST" {printf("CONST");j += yyleng;  return CONST; }
+
+"Integer"  {printf("Integer ");j += yyleng; return Integer; }
+
+"Real" { printf("Real "); j += yyleng; return Real; }
+
+{IDF} {  if(strlen(yytext)<=12)  { printf("%s",yytext); j += yyleng; yylval.chaine = strdup(yytext) ;return IDF; } } 
+
+{integer} { if (atoi(yytext) <= 32767) { yylval.entier = atoi(yytext); printf("%d",atoi(yytext)); j += yyleng; return integer; } else printf("OVERFLOW"); }
+
+{real} { yylval.reel = atof(yytext); printf("%f",atof(yytext)); j += yyleng; return real; }
+
+{OpCm} { printf("%s",yytext); j += yyleng; yylval.OpC = strdup(yytext); return OpCm; }
+
+{com} { ECHO; j += yyleng; yylval.cmt = strdup(yytext); comment(yytext);}
+
+. { j += yyleng; printf("Syntax Error at ligne %d, column %d\n",nbrL,j); }
+
+
+%%
+
+int yywrap()
+{ return 0 ;}
+

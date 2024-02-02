@@ -1,0 +1,878 @@
+%{
+ 	#include <stdio.h>
+	#include "TS.c"
+	#include "QUAD.c"
+	#include "pile.c"
+	#include "PileExp.c"
+	#include "Library.c"
+	#include "ListeCons.c"
+	#include "ListeExp.c"
+	extern FILE* yyin;
+	extern int nbrL;
+	extern int j;
+	element *list     = NULL;
+	Pile *pile        = NULL;
+	Pile *pDeb        = NULL;//utilisée pour stocker les pos de BZ et FIN
+	PileExp *pileExp   = NULL;
+	Quad *quad        = NULL; //Contient les Quads optimisés
+	Quad *quadTotal   = NULL; //Contient tous les Quads
+	Quad *quadTemp    = NULL; //contient Les quads suspectibles d'être optimisés
+	lib *library      = NULL;
+	ListeCons *cons   = NULL; 
+	ListeCons *r   	  = NULL; 
+	ListeExp *listeExp = NULL;
+	int pos			  = 0;
+	int QC            = 1;
+	int QCTotal       = 1;
+	int type          = -1; //utilisé lors de la DEC
+	int typeTemp      = -1;//stocker le type de IDF dans exp
+	char* arrayName;
+	char expr[256];
+	int i = 1;
+
+%}
+
+%union
+{
+  char *chaine;
+  char *OpC;
+  int entier;
+  float reel;
+  char *cmt;
+}
+
+%token '{' '}' '(' ')' '[' ']' '|' '!' '&' ':' ';' ',' '=' '+' '*' '#'
+%token While Integer Real CONST Calcul BOUCLE TAB EXECUT IF
+%token <inc> incdec
+%token <chaine> IDF
+%token <OpC> OpCm
+%token <entier> integer
+%token <reel> real
+%token <cmt> com
+%%
+
+S : LIB IDF '{' DEC INS '}' { printf("\n PROGRAMME CORRECTE\n"); return 0;};
+
+/*Déclaration des Bib*/
+LIB : 
+'#'Calcul LIB
+{
+	if(!chercherLib(library,"Calcul"))
+	{
+		insererLib(&library,"Calcul");
+	} 
+	else
+	{
+		printf("Error at line %d column %d : Calcul Library already imported\n",nbrL,j); 
+	    return 0; 
+	}
+}
+|'#'BOUCLE LIB
+{
+	if(!chercherLib(library,"BOUCLE"))
+	{
+		insererLib(&library,"BOUCLE");
+	} 
+	else
+	{
+		printf("Error at line %d column %d : BOUCLE Library already imported\n",nbrL,j); 
+	    return 0; 
+	}
+}
+|'#'TAB LIB
+{
+	if(!chercherLib(library,"TAB"))
+	{
+		insererLib(&library,"TAB");
+	} 
+	else
+	{
+		printf("Error at line %d column %d : TAB Library already imported\n",nbrL,j); 
+	    return 0; 
+	}
+}
+|;
+
+/*Type des Variables*/
+TYPE : Integer { type = 1;} | Real {type = 0;};
+
+/*point virgule*/
+PV : ';'PV | ';';
+
+/*Déclaration générale*/
+DEC : DecVar DEC | DecCons DEC| DecTab DEC|;
+
+/*Déclaration de varaiables*/
+DecVar :  TYPE SuiteV PV ;
+
+/*Déclararion d'une suite de variable séparées par ','*/
+SuiteV : IDF 
+{ 
+	if(!chercher(list,$1)) inserer(&list,$1,type,1,0);
+    else 
+	{
+		printf("Error at line %d column %d : %s already declared\n",nbrL,j,$1); 
+	    return 0; 
+	}
+	
+} ',' SuiteV 
+| IDF 
+{ 
+	if(!chercher(list,$1)) inserer(&list,$1,type,1,0);
+	else 
+	{
+		printf("Error at line %d column %d : %s already declared\n",nbrL,j,$1); 
+	    return 0; 
+	}
+}
+;
+
+/*Déclaration de Constantes*/
+DecCons : TYPE CONST SuiteC PV ;
+
+
+/*Déclaration d'une suite de constantes séparées par ','*/
+SuiteC : IDF 
+{ 
+	if(!chercher(list,$1)) { inserer(&list,$1,type,0,0); typeTemp = Type(list,$1);} 
+    else 
+	{
+	    printf("Error at line %d column %d : %s already declared\n",nbrL,j,$1); 
+	    return 0; 
+	}
+} '=' EXP 
+{ 
+  Pile *p = unstack(&pile);
+  //Ajouter la constante à la liste des constantes
+  ListeCons *r = chercherCons(cons,$1);
+  if(r == NULL) // constantes n'existe pas
+  {
+  	ajouterCons(&cons,$1,p->nom);
+  }
+
+  //
+  ajouter(&quad,"=",p->nom,"",$1);
+  QC++;
+  ajouter(&quadTotal,"=",p->nom,"",$1);
+  QCTotal++;
+}
+MP
+;
+
+MP : ',' SuiteC|;
+
+/*Déclaration de tableau*/
+DecTab : TYPE IDF
+{
+	if(!chercher(list,$2)) 
+	{ 
+		inserer(&list,$2,type,2,0); typeTemp = Type(list,$2);
+		arrayName = $2;
+	} 
+    else 
+	{
+	    printf("Error at line %d column %d : %s already declared\n",nbrL,j,$2); 
+	    return 0; 
+	}
+
+}'['TAILLE']' PV;
+
+TAILLE : integer
+{
+	insererTaille(list,arrayName,$1);
+}
+;
+
+
+/*Fin Déclarations*/
+INS : AFF INS| BCL INS|CND INS|;
+
+/*Affectation*/
+///____________________________________________________________________________
+AFF : IDF 
+{ 
+  	if(!chercher(list,$1)) 
+	{
+	  	printf("Error at line %d column %d : %s undeclared\n",nbrL,j,$1); 
+		return 0; 
+	}
+	if(!Nature(list,$1)) 
+  	{ 
+		printf("Error at line %d column %d : Cannot affect value to a constant\n",nbrL,j); 
+	  	return 0; 
+	}
+  	typeTemp = Type(list,$1);
+} 
+'='  EXP 
+{ 
+	//
+	i = 1;
+	//
+
+	PileExp *z = pileExp;
+
+	strcpy(expr,"");
+	while(z != NULL)
+	{
+		z = unstackExp(&pileExp);
+		if(z != NULL) 
+		{
+			strcat(expr,z->val);
+			strcat(expr," ");
+		}	
+	}
+
+
+	Pile *p = unstack(&pile);
+	
+	//
+	printf("EXPRESSION %s VA ETRE traitee\n",expr);
+
+	ListeExp *g = chercherExp(listeExp,expr);
+
+	if(g == NULL) //Nouvelle expression 
+	{
+		Quad *u = quadTemp;
+		insererExp(&listeExp,expr,$1);
+
+		//
+		while(u != NULL)
+		{
+			ajouter(&quad,u->op,u->op1,u->op2,u->res);
+			QC++;
+			u = u->svt;
+		}
+		ajouter(&quad,"=",p->nom,"",$1);
+		QC++;
+		//
+		ajouter(&quadTotal,"=",p->nom,"",$1);
+		QCTotal++;
+		//
+	}
+	else //EXP Déjà calculée 
+	{
+		ajouter(&quad,"=",g->var,"",$1);
+		QC++;
+		//
+		ajouter(&quadTotal,"=",p->nom,"",$1);
+		QCTotal++;
+		//
+	}
+
+	//FreeQuad(&quadTemp);
+
+printf("LISTE DES EXP DEJA CALCULEES\n");
+	AfficherListeExp(listeExp);
+}
+PV
+| 
+///_______________________________________________
+
+IDF'['integer']'
+{
+	//
+	strcpy(expr,""); 
+	//
+
+
+	if(!chercher(list,$1)) 
+	{
+	  	printf("Error at line %d column %d : Array %s undeclared\n",nbrL,j,$1); 
+		return 0; 
+	}
+	else if (!IsArray(list,$1))
+	{
+		printf("Error at line %d column %d : Variable %s IS NOT AN ARRAY\n",nbrL,j,$1); 
+		return 0;  
+	}
+	else if($3 >= getTailleArray(list,$1))
+	{
+		printf("Error at line %d column %d : OUT OF BOUND",nbrL,j); 
+		return 0; 
+	} 
+  	typeTemp = Type(list,$1);
+}
+'=' EXP PV
+{
+/*
+	//
+	i = 1;
+	//
+    Pile *p = unstack(&pile);
+    char *a = malloc(sizeof(int));
+    sprintf(a,"%s[%d]",$1,$3);
+    
+   	//
+   	ListeExp *g = chercherExp(listeExp,expr);
+	if(g == NULL)
+	{
+		insererExp(&listeExp,expr,a);
+		Quad *u = quadTemp;
+		//
+		while(u != NULL)
+		{
+			//Ajouter de nouvaux Quads
+			ajouter(&quad,u->op,u->op1,u->op2,u->res);
+			QC++;
+			u = u->svt;
+		}
+		//
+		ajouter(&quad,"=",p->nom,"",a);
+		QC++;
+		ajouter(&quadTotal,"=",p->nom,"",a);
+		QCTotal++;
+	}
+	else 
+	{
+		ajouter(&quad,"=",g->var,"",a);
+		QC++;
+		ajouter(&quadTotal,"=",g->var,"",a);
+		QCTotal++;
+	}
+    //
+    /**/
+} 
+;
+
+/*Grammaire des Expressions Arith*/
+
+EXP : EXP '+' TRM 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	
+  	//
+  	stackExp(&pileExp,"+");
+  	//
+
+  	if(p1->type == p2->type || typeTemp == 0) 
+  	{
+    	char *a = malloc(sizeof(int));
+	    sprintf(a,"T%d",i); 
+	    //
+	    i++;
+	    //
+
+	    // Ajouter les Quads d'exp dans un Quad temporaire
+	    ajouter(&quadTemp,"+",p2->nom,p1->nom,a);
+	    //
+
+	    //
+	    ajouter(&quadTotal,"+",p2->nom,p1->nom,a);
+	    QCTotal++;
+	    //
+
+	    if(p1->type == 0) stack(&pile,"EXP",a,0);
+	    else stack(&pile,"EXP",a,1);
+  	}
+ 	else 
+  	{
+    	printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+		return 0;
+  	}
+}
+| EXP '-' TRM 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+
+  	//
+  	strcat(expr,"-");
+  	strcat(expr," ");
+  	//
+
+
+  	if(p1->type == p2->type || typeTemp == 0) 
+  	{
+		char *a = malloc(sizeof(int));
+	    sprintf(a,"T%d",i); 
+	    //
+	    i++;
+	    //
+
+	    // Ajouter les Quads d'exp dans un Quad temporaire
+	    ajouter(&quadTemp,"-",p2->nom,p1->nom,a);
+	    //
+
+	    //
+	    ajouter(&quadTotal,"-",p2->nom,p1->nom,a);
+	    QCTotal++;
+	    //
+
+	    if(p1->type == 0) stack(&pile,"EXP",a,0);
+	    else stack(&pile,"EXP",a,1);
+  	}
+  	else 
+  	{
+    	printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+    	return 0;
+  	}
+}
+| TRM 
+{ 
+	Pile *p = unstack(&pile);
+	stack(&pile,"EXP",p->nom,p->type);
+}
+;
+TRM : TRM '*' FCT 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+
+  	//
+  	strcat(expr,"*");
+  	strcat(expr," ");
+  	//
+
+
+  	if(p1->type == p2->type || typeTemp == 0) 
+  	{
+    	char *a = malloc(sizeof(int));
+    	sprintf(a,"T%d",i); 
+    	//
+    	i++;
+    	//
+
+    	// Ajouter les Quads d'exp dans un Quad temporaire
+	    ajouter(&quadTemp,"*",p2->nom,p1->nom,a);
+	    //
+
+	    //
+	    ajouter(&quadTotal,"*",p2->nom,p1->nom,a);
+	    QCTotal++;
+	    //
+
+    	if(p1->type == 0) stack(&pile,"TRM",a,0);
+    	else stack(&pile,"TRM",a,1);
+  	}
+  	else 
+  	{
+    	printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+    	return 0;
+  	}
+}
+| TRM '/' FCT 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+
+  	//
+  	strcat(expr,"/");
+  	strcat(expr," ");
+  	//
+
+  	if(p1->type == p2->type || typeTemp == 0) 
+  	{
+    	char *a = malloc(sizeof(int));
+    	sprintf(a,"T%d",i); 
+    	//
+    	i++;
+    	//
+
+    	// Ajouter les Quads d'exp dans un Quad temporaire
+	    ajouter(&quadTemp,"/",p2->nom,p1->nom,a);
+	    //
+
+	    //
+	    ajouter(&quadTotal,"/",p2->nom,p1->nom,a);
+	    QCTotal++;
+	    //
+
+    	if(p1->type == 0) stack(&pile,"TRM",a,0);
+    	else stack(&pile,"TRM",a,1);
+  	}
+  	else 
+  	{
+    	printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+    	return 0;
+  	}
+}
+| FCT 
+{
+	Pile *p = unstack(&pile);
+  	stack(&pile,"TRM",p->nom,p->type);  
+}
+;
+
+FCT : IDF 
+{
+	if(!chercher(list,$1)) 
+	{
+    	printf("Error at line %d column %d : %s undeclared\n",nbrL,j,$1); 
+    	return 0; 
+  	}
+  	if(typeTemp == 1 && Type(list,$1) == 0) 
+  	{
+    	printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+    	return 0;
+  	}
+  	//Optimisation des constantes
+  	if(r != NULL) //IDF est une constante
+  	{
+  		stack(&pile,"F",r->val,Type(list,$1));
+  	}
+  	else stack(&pile,"F",$1,Type(list,$1));
+
+  	//Récupérer l'expression
+	stackExp(&pileExp,$1);
+	//
+
+}
+| IDF'['integer']'
+{
+	if(!chercher(list,$1)) 
+	{
+	  	printf("Error at line %d column %d : Array %s undeclared\n",nbrL,j,$1); 
+		return 0; 
+	}
+	else if (!IsArray(list,$1))
+	{
+		printf("Error at line %d column %d : Variable %s IS NOT AN ARRAY\n",nbrL,j,$1); 
+		return 0;  
+	}
+	else if($3 >= getTailleArray(list,$1))
+	{
+		printf("Error at line %d column %d : OUT OF BOUND",nbrL,j); 
+		return 0; 
+	}
+	else 
+  {
+    char *a = malloc(sizeof(int));
+    sprintf(a,"%s[%d]",$1,$3);
+
+    //Récupérer l'expression
+	strcat(expr,a);
+	strcat(expr," ");
+	//
+
+
+    stack(&pile,"F",a,Type(list,$1));
+  }
+}
+| integer
+{	
+	char *a = malloc(sizeof(int));
+	sprintf(a,"%d",$1);
+
+	//Récupérer l'expression
+	
+	//
+
+  	stack(&pile,"FCT",a,1);  	
+}
+| real
+{
+	if(typeTemp != 0)  
+	{
+	  printf("Error at line %d column %d : Type mismatch\n",nbrL,j);
+		return 0;
+	}
+  	else
+	{
+    	char *a = malloc(sizeof(float));
+	  	sprintf(a,"%f",$1);
+
+	  	//Récupérer l'expression
+		
+		//
+
+    	stack(&pile,"FCT",a,0);
+  	}  	
+}
+| '('EXP')' 
+{ 
+	Pile *p = unstack(&pile);
+  	stack(&pile,"FCT",p->nom,p->type);	
+}  
+;
+/*Fin de la grammaire des expressions arithmétiques*/
+
+/*BOUCLE*/
+BCL : BCL1 '{' INS '}'
+{
+  	QC++;
+  	Pile *p = unstack(&pDeb); //BZ QC
+  	Quad *q = getQuad(quad,p->type);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"%d",QC);
+  	q->op1 = a;
+  	Pile *r = unstack(&pDeb);
+  	char *b = malloc(sizeof(int));
+  	sprintf(b,"%d",r->type);
+	ajouter(&quad,"BR",b,"","");
+}
+;
+BCL1 : BCL2 '('EVA')'
+{
+	Pile *p = unstack(&pile);
+	ajouter(&quad,"BZ","",p->nom,"");
+	stack(&pDeb,"","",QC);
+  	QC++;
+
+
+}
+;
+BCL2 : While 
+{
+	stack(&pDeb,"","",QC); 
+}
+;
+
+/*Condition if*/
+CND  : CND1 IF '('EVA')'
+{
+	Pile *p = unstack(&pDeb); //Update QC of FIN
+	Quad *q = getQuad(quad,p->type);
+	char *a = malloc(sizeof(int));
+  	sprintf(a,"%d",QC+1);
+  	q->op1 = a;
+  	//CREATE BNZ QUAD
+  	p = unstack(&pile);
+  	Pile *r = unstack(&pDeb);
+  	char *b = malloc(sizeof(int));
+  	sprintf(b,"%d",r->type);
+  	ajouter(&quad,"BNZ",b,p->nom,"");
+  	QC++;
+
+}
+;
+CND1 : CND2 INS
+{
+
+	Pile *p = unstack(&pDeb); //Update QC of BR
+	Quad *q = getQuad(quad,p->type);
+	char *a = malloc(sizeof(int));
+  	//BR FIN
+  	ajouter(&quad,"BR","","","");
+  	stack(&pDeb,"","",QC); // store QC FIN
+  	QC++;
+  	sprintf(a,"%d",QC);
+  	q->op1 = a;
+}
+;
+CND2 : EXECUT
+{
+	ajouter(&quad,"BR","","","");
+	pos = QC;
+	QC++;
+	stack(&pDeb,"","",QC); //QC of INS
+	stack(&pDeb,"","",pos); //QC of BR
+}
+;
+
+/*Grammaire des conditions */
+EVA : EVA '|' A  
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	ajouter(&quad,"+",p1->nom,p2->nom,a);
+  	stack(&pile,"EVA",a,0);
+  	QC++;	
+}
+| A
+{
+	Pile *p = unstack(&pile);
+  	stack(&pile,"EVA",p->nom,0);	
+}
+;
+
+A : B '&' A 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	ajouter(&quad,"*",p1->nom,p2->nom,a);
+  	stack(&pile,"A",a,0);
+  	QC++;	
+}   
+| B
+{
+	Pile *p = unstack(&pile);
+  	stack(&pile,"A",p->nom,0);	
+}
+;
+
+B : '(' EXP OpCm EXP ')' 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	if(!strcmp($3,"<")) 
+  	{
+    	ajouter(&quad,"<",p2->nom,p1->nom,a);
+     	QC++;
+  	}
+  	else if(!strcmp($3,">")) 
+  	{
+    	ajouter(&quad,">",p2->nom,p1->nom,a);
+    	QC++;
+  	} 
+  	else if(!strcmp($3,"<=")) 
+  	{
+    	ajouter(&quad,"<=",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($3,">=")) 
+  	{
+    	ajouter(&quad,">=",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($3,"==")) 
+  	{
+    	ajouter(&quad,"==",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($3,"!=")) 
+  	{
+    	ajouter(&quad,"!=",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	stack(&pile,"B",a,0);	
+}
+|'!' '(' EXP OpCm EXP ')'
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	char *b = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	if(!strcmp($4,"<")) 
+  	{
+  		ajouter(&quad,"<",p2->nom,p1->nom,a);
+    	QC++;
+    	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	}
+  	else if(!strcmp($4,">")) 
+  	{	
+    	ajouter(&quad,">",p2->nom,p1->nom,a);
+    	QC++;
+    	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	} 
+  	else if(!strcmp($4,"<=")) 
+  	{
+    	ajouter(&quad,"<=",p2->nom,p1->nom,a);
+    	QC++;       
+    	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	}
+  	else if(!strcmp($4,">=")) 
+  	{
+    	ajouter(&quad,">=",p2->nom,p1->nom,a);
+    	QC++;
+    	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	}
+  	else if(!strcmp($4,"==")) 
+  	{
+  		ajouter(&quad,"==",p2->nom,p1->nom,a);
+    	QC++;
+    	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	}
+  	else if(!strcmp($4,"!=")) 
+  	{
+    	ajouter(&quad,"!=",p2->nom,p1->nom,a);
+   	 	QC++;
+   	 	sprintf(b,"T%d",QC);
+    	ajouter(&quad,"==","0",a,b);
+    	QC++;
+    	stack(&pile,"B",b,0);
+  	}//stack(&pile,"B",a,0);	
+}
+|  EXP OpCm EXP 
+{
+	Pile *p1 = unstack(&pile);
+  	Pile *p2 = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	if(!strcmp($2,"<")) 
+  	{
+  		ajouter(&quad,"<",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($2,">")) 
+  	{
+  		ajouter(&quad,">",p2->nom,p1->nom,a);
+    	QC++;
+  	} 
+  	else if(!strcmp($2,"<=")) 
+  	{
+  		ajouter(&quad,"<=",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($2,">=")) 
+  	{
+  		ajouter(&quad,">=",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($2,"==")) 
+  	{
+    	ajouter(&quad,"==",p2->nom,p1->nom,a);
+    	QC++;
+  	}
+  	else if(!strcmp($2,"!=")) 
+  	{
+  		ajouter(&quad,"!=",p2->nom,p1->nom,a);
+		QC++;
+	}	
+  	stack(&pile,"B",a,0);	
+}
+| '!' EXP
+{
+	Pile *p = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	ajouter(&quad,"==",p->nom,"0",a);
+  	QC++;
+  	stack(&pile,"B",a,0);	
+}
+| EXP 
+{
+	Pile *p = unstack(&pile);
+  	char *a = malloc(sizeof(int));
+  	sprintf(a,"T%d",QC);
+  	ajouter(&quad,">","0",p->nom,a);
+  	QC++;
+  	stack(&pile,"B",a,0);	
+}
+;
+/*Fin Grammaire Condition*/
+
+
+
+
+
+%%
+
+int yyerror(char* msg)
+{
+printf("%s\n",msg);
+return 1;
+}
+
+int main()
+{
+	yyin=fopen("code.txt","r");
+	yyparse();
+	printf("Code avant Optimisation\n");
+	afficher_Quad(quadTotal);
+	printf("Code apres Optimisation\n");
+	afficher_Quad(quad);
+	return 0;
+}

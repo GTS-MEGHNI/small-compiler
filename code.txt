@@ -1,0 +1,33 @@
+#TAB
+#BOUCLE
+#Calcul
+Program
+{
+	Integer CONST X = 5;
+	Integer Y,Z,J,K,I;
+
+	J = 5;
+	I = 10;
+
+
+
+
+
+
+	
+
+	EXECUT Z = 4 * 3; Y = Z; IF(I > 2)
+
+	K = Z;
+
+
+
+	
+
+
+
+
+
+}
+
+
